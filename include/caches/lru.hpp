@@ -20,6 +20,12 @@ class LRU final : public ICache<KeyT, PageT> {
  public:
   explicit LRU(std::size_t capacity) : capacity_(capacity) {}
 
+  LRU(const LRU& other) = delete;
+  LRU& operator=(const LRU& other) = delete;
+
+  LRU(LRU&& other) noexcept = default;
+  LRU& operator=(LRU&& other) noexcept = default;
+
   std::optional<PageT> get(const KeyT& key) override {
     auto cache_iter = idx_map_.find(key);
     if (cache_iter == idx_map_.end()) {
