@@ -35,13 +35,17 @@ class LRU final : public ICache<KeyT, PageT> {
 
     this->inc_hits();
     items_.splice(items_.begin(), items_, cache_iter->second);
-    return *cache_iter->second->page;
+    return cache_iter->second->page;
   }
 
   void put(const KeyT& key, const PageT& page) override {
+    if (capacity() == 0) {
+      return;
+    }
+
     auto cache_iter = idx_map_.find(key);
     if (cache_iter != idx_map_.end()) {
-      *cache_iter->second->page = page;
+      cache_iter->second->page = page;
       items_.splice(items_.begin(), items_, cache_iter->second);
       return;
     }
@@ -54,9 +58,10 @@ class LRU final : public ICache<KeyT, PageT> {
     idx_map_[key] = items_.begin();
   }
 
-  bool full() const { return capacity_ == items_.size(); }
   std::size_t size() const override { return items_.size(); }
   std::size_t capacity() const override { return capacity_; }
+  bool full() const { return capacity_ == items_.size(); }
+  bool empty() const override { return size() == 0; }
 
   void clear() override {
     items_.clear();
@@ -67,8 +72,7 @@ class LRU final : public ICache<KeyT, PageT> {
 
  private:
   void evict() {
-    ListIt last = items_.back();
-    idx_map_.erase(last.key);
+    idx_map_.erase(items_.back().key);
     items_.pop_back();
   }
 
