@@ -1,0 +1,15 @@
+build/
+build-*/
+cmake-build-*/
+reports/
+*.o
+*.obj
+*.out
+*.exe
+.cache/
+compile_commands.json
+.idea/
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
