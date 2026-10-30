@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  clang-format:
+    name: clang-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-19
+
+      - name: Check formatting
+        run: |
+          mapfile -t files < <(git ls-files '*.cpp' '*.hpp' '*.h')
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No C++ files to check"
+            exit 0
+          fi
+          clang-format-19 --dry-run --Werror -style=file "${files[@]}"
+
+  build-and-test:
+    name: Build & Test (${{ matrix.preset }})
+    needs: clang-format
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [debug, release]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtest-dev
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --parallel
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+  sanitizers:
+    name: Sanitizers (${{ matrix.preset }})
+    needs: clang-format
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [asan, ubsan, asan-ubsan]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtest-dev
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --parallel
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
