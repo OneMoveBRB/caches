@@ -193,15 +193,3 @@ class TwoQ final : public ICache<KeyT, PageT> {
 };
 
 }  // namespace caches
-
-#if 0
-  static constexpr double kDefaultInRatio = 0.25;
-  static constexpr double kDefaultOutRatio = 0.50;
-  explicit TwoQ(std::size_t capacity, double in_ratio = kDefaultInRatio,
-                double out_ratio = kDefaultOutRatio)
-      : capacity_(capacity),
-        in_capacity_(std::max<std::size_t>(
-           1, static_cast<std::size_t>((double)capacity * in_ratio))),
-        out_capacity_(std::max<std::size_t>(
-            1, static_cast<std::size_t>((double)capacity * out_ratio))) {}
-#endif
