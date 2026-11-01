@@ -14,6 +14,7 @@ include(GoogleTest)
 
 foreach(src IN ITEMS
   lru
+  lfu
 )
   add_executable(${src}_unit_tests ${src}_test.cpp)
   target_link_libraries(${src}_unit_tests 
