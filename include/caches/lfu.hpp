@@ -96,6 +96,13 @@ class LFU : public ICache<KeyT, PageT> {
 
   void evict() {
     auto bucket_iter = buckets_.find(min_freq_);
+    if (bucket_iter == buckets_.end() || bucket_iter->second.empty()) {
+        // [need for -Wnull-dereference]
+        // We shouldn't be able to jmp here, based on the invariant:
+        // `evict` is called when `full()` is true
+      return;
+    }
+
     Bucket& bucket = bucket_iter->second;
 
     node_iters_.erase(bucket.front().key);
