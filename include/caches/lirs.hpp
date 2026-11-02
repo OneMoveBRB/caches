@@ -3,6 +3,7 @@
 #include <cassert>
 #include <list>
 #include <unordered_map>
+#include <utility>
 
 #include "cache.hpp"
 
@@ -12,6 +13,7 @@ template <typename KeyT, typename PageT>
 class LIRS final : public ICache<KeyT, PageT> {
  private:
   struct Entry;
+
   using List = std::list<Entry*>;
   using ListIt = typename List::iterator;
 
@@ -42,8 +44,25 @@ class LIRS final : public ICache<KeyT, PageT> {
   LIRS(const LIRS& other) = delete;
   LIRS& operator=(const LIRS& other) = delete;
 
-  LIRS(LIRS&& other) noexcept = default;
-  LIRS& operator=(LIRS&& other) noexcept = default;
+  LIRS(LIRS&& other) noexcept
+      : capacity_(other.capacity_),
+        lir_size_(std::exchange(other.lir_size_, 0)),
+        lir_capacity_(other.lir_capacity_),
+        resident_size_(std::exchange(other.resident_size_, 0)),
+        stack_(std::move(other.stack_)),
+        queue_(std::move(other.queue_)),
+        entries_(std::move(other.entries_)) {}
+
+  LIRS& operator=(LIRS&& other) noexcept {
+    if (this == &other) {
+      return *this;
+    }
+
+    LIRS temp_cache(std::move(other));
+    swap(temp_cache);
+
+    return *this;
+  }
 
   std::optional<PageT> get(const KeyT& key) override {
     auto entry_iter = entries_.find(key);
@@ -120,6 +139,19 @@ class LIRS final : public ICache<KeyT, PageT> {
     stack_.clear();
     queue_.clear();
     entries_.clear();
+  }
+
+  void swap(LIRS& other) noexcept {
+    std::swap(this->hits_, other.hits_);
+    std::swap(this->misses_, other.misses_);
+
+    std::swap(capacity_, other.capacity_);
+    std::swap(lir_size_, other.lir_size_);
+    std::swap(lir_capacity_, other.lir_capacity_);
+    std::swap(resident_size_, other.resident_size_);
+    std::swap(stack_, other.stack_);
+    std::swap(queue_, other.queue_);
+    std::swap(entries_, other.entries_);
   }
 
  private:
