@@ -33,6 +33,34 @@ class ARC final : public ICache<KeyT, PageT> {
     std::optional<PageT> page;
   };
 
+#ifndef NDEBUG
+  bool check_invariants() const {
+    if (parameter_ > capacity()) {
+      return false;
+    }
+
+    if (resident_size() > capacity()) {
+      return false;
+    }
+
+    if (top1_.size() + bottom1_.size() > capacity()) {
+      return false;
+    }
+
+    if (resident_size() + ghost_size() > 2 * capacity()) {
+      return false;
+    }
+
+    if (entries_.size() != resident_size() + ghost_size()) {
+      return false;
+    }
+
+    return check_list(top1_, Segment::Top1) && check_list(top2_, Segment::Top2)
+           && check_list(bottom1_, Segment::Bottom1)
+           && check_list(bottom2_, Segment::Bottom2);
+  }
+#endif // !NDEBUG
+
  public:
   explicit ARC(std::size_t capacity) : capacity_(capacity) {}
 
@@ -312,6 +340,34 @@ class ARC final : public ICache<KeyT, PageT> {
       throw;
     }
   }
+
+#ifndef NDEBUG
+  bool check_list(const List& list, Segment expected) const {
+    for (auto it = list.begin(); it != list.end(); ++it) {
+      auto map_it = entries_.find(*it);
+
+      if (map_it == entries_.end()) {
+        return false;
+      }
+
+      const Entry& entry = map_it->second;
+
+      if (entry.segment != expected) {
+        return false;
+      }
+
+      if (entry.iter != it) {
+        return false;
+      }
+
+      if (is_resident(expected) != entry.page.has_value()) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+#endif // !NDEBUG
 
   std::size_t capacity_ = 0;
   std::size_t parameter_ = 0;
