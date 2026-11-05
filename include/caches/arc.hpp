@@ -1,9 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
-#include <cstddef>
 #include <list>
 #include <unordered_map>
+#include <utility>
 
 #include "cache.hpp"
 
@@ -12,9 +13,11 @@ namespace caches {
 template <typename KeyT, typename PageT>
 class ARC final : public ICache<KeyT, PageT> {
  private:
+  struct Entry;
+
   using List = std::list<KeyT>;
   using ListIt = typename List::iterator;
-  using UMap = std::unordered_map<KeyT, PageT>;
+  using UMap = std::unordered_map<KeyT, Entry>;
   using UMapIt = typename UMap::iterator;
 
   enum class Segment {
@@ -31,24 +34,132 @@ class ARC final : public ICache<KeyT, PageT> {
   };
 
  public:
-  std::optional<PageT> get(const KeyT& key);
-  void put(const KeyT& key, const PageT& page);
+  explicit ARC(std::size_t capacity) : capacity_(capacity) {}
 
-  std::size_t size() const;
-  std::size_t capacity() const;
-  bool empty() const { return size() == 0; }
-  void clear();
+  ARC(const ARC& other) = delete;
+  ARC(ARC&& other) noexcept
+      : capacity_(other.capacity_),
+        parameter_(std::exchange(other.parameter_, 0)),
+        top1_(std::move(other.top1_)),
+        top2_(std::move(other.top2_)),
+        bottom1_(std::move(other.bottom1_)),
+        bottom2_(std::move(other.bottom2_)) {}
+
+  ARC& operator=(const ARC& other) = delete;
+  ARC& operator=(ARC&& other) noexcept {
+    if (this == &other) {
+      return *this;
+    }
+
+    ARC temp_arc(std::move(other));
+    swap(temp_arc);
+
+    return *this;
+  }
+
+  std::optional<PageT> get(const KeyT& key) override {
+    auto entries_iter = entries_.find(key);
+
+    if (entries_iter == entries_.end()) {
+      this->inc_misses();
+      return std::nullopt;
+    }
+
+    Entry& entry = entries_iter->second;
+
+    // Ghost hit: the page is not in memory
+    if (!is_resident(entry.segment)) {
+      this->inc_misses();
+      return std::nullopt;
+    }
+
+    this->inc_hits();
+
+    // Cache hit: Top1 -> Top2 or Top2 -> MRU Top2
+    move_to_mru(entries_iter, Segment::Top2);
+
+    return entry.page;
+  }
+
+  void put(const KeyT& key, const PageT& page) override {
+    if (capacity() == 0) {
+      return;
+    }
+
+    auto entries_iter = entries_.find(key);
+
+    // New key
+    if (entries_iter == entries_.end()) {
+      insert_new(key, page);
+    }
+
+    // Resident hit
+    if (is_resident(entries_iter->second.segment)) {
+      entries_iter->second.page = page;
+      move_to_mru(entries_iter, Segment::Top2);
+
+      return;
+    }
+
+    // Ghost hit
+    if (entries_iter->second.segment == Segment::Bottom1) {
+    // Ghost hit: Bottom1
+      adapt_from_bottom1();
+    } else {
+    // Ghost hit: Bottom2
+      adapt_from_bottom2();
+    }
+
+    replace(key);
+
+    entries_iter->second.page = page;
+    move_to_mru(entries_iter, Segment::Top2);
+
+    return;
+  }
+
+  std::size_t size() const override { return resident_size(); }
+  std::size_t capacity() const override { return capacity_; }
+  bool empty() const override { return size() == 0; }
+  void clear() override {
+    this->hits_ = 0;
+    this->misses_ = 0;
+
+    parameter_ = 0;
+
+    top1_.clear();
+    top2_.clear();
+    bottom1_.clear();
+    bottom2_.clear();
+
+    entries_.clear();
+  }
+
+  void swap(ARC& other) noexcept {
+    std::swap(this->hits_, other.hits_);
+    std::swap(this->misses_, other.misses_);
+
+    std::swap(capacity_, other.capacity_);
+    std::swap(parameter_, other.parameter_);
+    std::swap(top1_, other.top1_);
+    std::swap(top2_, other.top2_);
+    std::swap(bottom1_, other.bottom1_);
+    std::swap(bottom2_, other.bottom2_);
+    std::swap(entries_, other.entries_);
+  }
 
  private:
-  // Helpers
   List& list_of(Segment segment) {
     switch (segment) {
       case Segment::Top1:
         return top1_;
+
       case Segment::Top2:
         return top2_;
+
       case Segment::Bottom1:
         return bottom1_;
+
       case Segment::Bottom2:
         return bottom2_;
     }
@@ -61,10 +172,13 @@ class ARC final : public ICache<KeyT, PageT> {
     switch (segment) {
       case Segment::Top1:
         return top1_;
+
       case Segment::Top2:
         return top2_;
+
       case Segment::Bottom1:
         return bottom1_;
+
       case Segment::Bottom2:
         return bottom2_;
     }
@@ -73,16 +187,15 @@ class ARC final : public ICache<KeyT, PageT> {
     return top1_;
   }
 
+  std::size_t resident_size() const { return top1_.size() + top2_.size(); }
+  std::size_t ghost_size() const { return bottom1_.size() + bottom2_.size(); }
+
   static bool is_resident(Segment segment) {
     return segment == Segment::Top1 || segment == Segment::Top2;
   }
 
-  std::size_t resident_size() const { return top1_.size() + top2_.size(); }
-
-  std::size_t ghost_size() const { return bottom1_.size() + bottom2_.size(); }
-
-  void move_to_mru(UMapIt entries_iter, Segment dest_segment) {
-    Entry& entry = entries_iter->second;
+  void move_to_mru(UMapIt it, Segment dest_segment) {
+    Entry& entry = it->second;
 
     List& src = list_of(entry.segment);
     List& dest = list_of(dest_segment);
@@ -90,7 +203,6 @@ class ARC final : public ICache<KeyT, PageT> {
     dest.splice(dest.begin(), src, entry.iter);
 
     entry.segment = dest_segment;
-    // entry.iter = dest.begin();
   }
 
   void remove_ghost_lru(Segment segment) {
@@ -106,13 +218,110 @@ class ARC final : public ICache<KeyT, PageT> {
     ghost.pop_back();
   }
 
+  void remove_top1_lru() {
+    assert(!top1_.empty());
+
+    entries_.erase(top1_.back());
+    top1_.pop_back();
+  }
+
+  void evict(Segment src_segment, Segment dest_segment) {
+    List& src = list_of(src_segment);
+
+    assert(!src.empty());
+
+    auto it = entries_.find(src.back());
+
+    assert(it != entries_.end());
+
+    move_to_mru(it, dest_segment);
+
+    // Ghost contains only the key
+    it->second.page.reset();
+  }
+
+  void replace(const KeyT& key) {
+    auto entries_iter = entries_.find(key);
+
+    const bool in_bottom2 = entries_iter != entries_.end()
+                            && entries_iter->second.segment == Segment::Bottom2;
+
+    const bool choose_top1 = !top1_.empty()
+                             && ((in_bottom2 && top1_.size() == parameter_)
+                                 || top1_.size() > parameter_);
+
+    if (choose_top1) {
+      evict(Segment::Top1, Segment::Bottom1);
+    } else if (!top2_.empty()) {
+      evict(Segment::Top2, Segment::Bottom2);
+    } else if (!top1_.empty()) {
+      // just in case: protection against a degenerate state
+      assert(false && "ARC: degenerate state in replace()");
+      evict(Segment::Top1, Segment::Bottom1);
+    }
+  }
+
+  void adapt_from_bottom1() {
+    const std::size_t b1_sz = bottom1_.size();
+    const std::size_t b2_sz = bottom2_.size();
+
+    const std::size_t delta =
+        std::max<std::size_t>(1, b2_sz / std::max<std::size_t>(1, b1_sz));
+
+    parameter_ += std::min(delta, capacity() - parameter_);
+  }
+
+  void adapt_from_bottom2() {
+    const std::size_t b1_sz = bottom1_.size();
+    const std::size_t b2_sz = bottom2_.size();
+
+    const std::size_t delta =
+        std::max<std::size_t>(1, b1_sz / std::max<std::size_t>(1, b2_sz));
+
+    parameter_ = delta >= parameter_ ? 0 : parameter_ - delta;
+  }
+
+  void insert_new(const KeyT& key, const PageT& page) {
+    // Case 1: |Top1| + |Bottom1| == capacity
+    if (top1_.size() + bottom1_.size() == capacity()) {
+      if (top1_.size() < capacity()) {
+        remove_ghost_lru(Segment::Bottom1);
+        replace(key);
+      } else {
+        remove_top1_lru();
+      }
+    }
+
+    // Case 2: |Top1| + |Bottom1| < capacity
+    else if (top1_.size() + bottom1_.size() < capacity()
+             && resident_size() + ghost_size() >= capacity()) {
+      if (resident_size() + ghost_size() >= 2 * capacity()) {
+        remove_ghost_lru(Segment::Bottom2);
+      }
+
+      replace(key);
+    }
+
+    // Insert into Top1
+    top1_.push_front(key);
+
+    try {
+      entries_.emplace(key, Entry{Segment::Top1, top1_.begin(), page});
+    } catch (...) {
+      top1_.pop_front();
+      throw;
+    }
+  }
+
   std::size_t capacity_ = 0;
   std::size_t parameter_ = 0;
 
-  List top1_, bottom1_;
-  List top2_, bottom2_;
+  List top1_;
+  List top2_;
+  List bottom1_;
+  List bottom2_;
 
-  std::unordered_map<KeyT, Entry> entries_;
+  UMap entries_;
 };
 
 }  // namespace caches
