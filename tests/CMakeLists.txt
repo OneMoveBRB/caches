@@ -17,6 +17,7 @@ foreach(src IN ITEMS
   lfu
   two_q
   lirs
+  arc
 )
   add_executable(${src}_unit_tests ${src}_test.cpp)
   target_link_libraries(${src}_unit_tests 
