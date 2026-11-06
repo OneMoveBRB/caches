@@ -71,7 +71,11 @@ class ARC final : public ICache<KeyT, PageT> {
         top1_(std::move(other.top1_)),
         top2_(std::move(other.top2_)),
         bottom1_(std::move(other.bottom1_)),
-        bottom2_(std::move(other.bottom2_)) {}
+        bottom2_(std::move(other.bottom2_)),
+        entries_(std::move(other.entries_)) {
+    this->hits_ = std::exchange(other.hits_, 0);
+    this->misses_ = std::exchange(other.misses_, 0);
+  }
 
   ARC& operator=(const ARC& other) = delete;
   ARC& operator=(ARC&& other) noexcept {
@@ -119,18 +123,22 @@ class ARC final : public ICache<KeyT, PageT> {
     // New key
     if (entries_iter == entries_.end()) {
       insert_new(key, page);
+
+      return;
     }
 
+    Entry& entry = entries_iter->second;
+
     // Resident hit
-    if (is_resident(entries_iter->second.segment)) {
-      entries_iter->second.page = page;
+    if (is_resident(entry.segment)) {
+      entry.page = page;
       move_to_mru(entries_iter, Segment::Top2);
 
       return;
     }
 
     // Ghost hit
-    if (entries_iter->second.segment == Segment::Bottom1) {
+    if (entry.segment == Segment::Bottom1) {
     // Ghost hit: Bottom1
       adapt_from_bottom1();
     } else {
@@ -138,9 +146,11 @@ class ARC final : public ICache<KeyT, PageT> {
       adapt_from_bottom2();
     }
 
-    replace(key);
+    if (resident_size() == capacity()) {
+      replace(key);
+    }
 
-    entries_iter->second.page = page;
+    entry.page = page;
     move_to_mru(entries_iter, Segment::Top2);
 
     return;
