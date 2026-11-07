@@ -31,6 +31,9 @@ class LIRS final : public ICache<KeyT, PageT> {
   };
 
  public:
+  explicit LIRS(std::size_t capacity)
+      : LIRS(capacity, default_lir_capacity(capacity)) {}
+
   explicit LIRS(std::size_t capacity, std::size_t lir_capacity)
       : capacity_(capacity),
         lir_size_(0),
@@ -155,6 +158,14 @@ class LIRS final : public ICache<KeyT, PageT> {
   }
 
  private:
+  static std::size_t default_lir_capacity(std::size_t capacity) {
+    assert(capacity >= 2);
+
+    const std::size_t hir_capacity = capacity / 100 + (capacity % 100 != 0);
+
+    return capacity - hir_capacity;
+  }
+
   void list_push_front(List& list, Entry& entry,
                        ListIt Entry::* list_iter_member,
                        bool Entry::* in_list_member) {
