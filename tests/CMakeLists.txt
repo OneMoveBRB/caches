@@ -12,6 +12,8 @@ endif()
 
 include(GoogleTest)
 
+# --- Unit tests ---
+
 foreach(src IN ITEMS
   lru
   lfu
@@ -20,7 +22,7 @@ foreach(src IN ITEMS
   arc
   belady
 )
-  add_executable(${src}_unit_tests ${src}_test.cpp)
+  add_executable(${src}_unit_tests unit/${src}_test.cpp)
   target_link_libraries(${src}_unit_tests 
     PRIVATE
       caches
@@ -37,3 +39,28 @@ foreach(src IN ITEMS
   gtest_discover_tests(${src}_unit_tests)
 endforeach()
 
+# --- Invariants ---
+
+foreach(src IN ITEMS
+  counter
+  size
+  put_get_consistency
+  clear_semantics
+  determinism
+  edge_cases
+  belady_optimality
+)
+  add_executable(${src}_invariant_tests invariants/${src}_test.cpp)
+  target_link_libraries(${src}_invariant_tests
+    PRIVATE
+      caches
+      GTest::gtest
+      GTest::gtest_main
+  )
+  target_include_directories(${src}_invariant_tests
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/invariants
+  )
+  caches_set_warnings(${src}_invariant_tests)
+  gtest_discover_tests(${src}_invariant_tests)
+endforeach()
