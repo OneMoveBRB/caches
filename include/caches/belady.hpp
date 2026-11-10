@@ -85,6 +85,12 @@ class OptimalCache {
       const std::uint64_t id = victim->second;
 
       auto key_it = id_to_key_.find(id);
+      if (key_it == id_to_key_.end()) {
+        // [need for -Werror=null-dereference]
+        // We shouldn't be able to jmp here, based on the invariant:
+        // eviction is triggered when the cache is full
+        return {Result::Miss, std::nullopt};
+      }
 
       evicted = key_it->second;
 
